@@ -1012,6 +1012,7 @@ public static <T> T doPrivilegedWithCombiner(PrivilegedExceptionAction<T> action
 		AccessControlContext context, Permission... perms)
 	throws PrivilegedActionException
 {
+	System.out.println("OpenJ9 doPrivilegedWithCombiner");
 	checkPermsNPE(perms);
 	return doPrivileged(action, doPrivilegedWithCombinerHelper(context), perms);
 }
@@ -1023,17 +1024,27 @@ public static <T> T doPrivilegedWithCombiner(PrivilegedExceptionAction<T> action
  *
  * @return  An AccessControlContext to be applied to the doPrivileged(action, context, perms).
  */
+// @CallerSensitive
+// private static AccessControlContext doPrivilegedWithCombinerHelper(AccessControlContext context) {
+// 	System.out.println("OpenJ9 doPrivilegedWithCombinerHelper");
+// 	ProtectionDomain domain = getCallerPD(2);
+// 	ProtectionDomain[] pdArray = (domain == null) ? null : new ProtectionDomain[] { domain };
+// 	AccessControlContext fixedContext = new AccessControlContext(context, pdArray, getNewAuthorizedState(context, domain));
+// 	if (context == null) {
+// 		AccessControlContext parentContext = getContextHelper(true);
+// 		fixedContext.domainCombiner = parentContext.domainCombiner;
+// 		fixedContext.nextStackAcc = parentContext;
+// 	}
+// 	return fixedContext;
+// }
 @CallerSensitive
 private static AccessControlContext doPrivilegedWithCombinerHelper(AccessControlContext context) {
 	ProtectionDomain domain = getCallerPD(2);
 	ProtectionDomain[] pdArray = (domain == null) ? null : new ProtectionDomain[] { domain };
-	AccessControlContext fixedContext = new AccessControlContext(context, pdArray, getNewAuthorizedState(context, domain));
-	if (context == null) {
-		AccessControlContext parentContext = getContextHelper(true);
-		fixedContext.domainCombiner = parentContext.domainCombiner;
-		fixedContext.nextStackAcc = parentContext;
-	}
-	return fixedContext;
+	AccessControlContext parentContext = getContext();
+	DomainCombiner dc = parentContext.getCombiner();
+
+	return new AccessControlContext(pdArray, dc, parentContext, context, getNewAuthorizedState(context, domain));
 }
 
 }

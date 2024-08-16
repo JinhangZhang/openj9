@@ -331,6 +331,7 @@ AccessControlContext(ProtectionDomain[] context, int authorizeState) {
 
 AccessControlContext(AccessControlContext acc, ProtectionDomain[] context, int authorizeState) {
 	super();
+	System.out.println("AccessControlContext constructor authorizeState is: " + authorizeState);
 	switch (authorizeState) {
 	default:
 		// authorizeState can't be STATE_UNKNOWN, callerPD always is NULL
@@ -346,6 +347,42 @@ AccessControlContext(AccessControlContext acc, ProtectionDomain[] context, int a
 	}
 	this.doPrivilegedAcc = acc;
 	this.context = context;
+	this.authorizeState = authorizeState;
+	this.containPrivilegedContext = true;
+}
+
+AccessControlContext(ProtectionDomain[] pdArray, @SuppressWarnings("removal") DomainCombiner combiner,
+		AccessControlContext parent, AccessControlContext acc, int authorizeState) {
+	super();
+	System.out.println("AccessControlContext constructor authorizeState is: " + authorizeState);
+	switch (authorizeState) {
+	default:
+		// authorizeState can't be STATE_UNKNOWN, callerPD always is NULL
+		throw new IllegalArgumentException();
+	case STATE_AUTHORIZED:
+		if (null != acc) {
+			// inherit the domain combiner when authorized
+			if (combiner != null) {
+				this.context = combiner.combine(pdArray, acc.context);
+			} else {
+				this.context = combinePDObjs(pdArray, acc.context);
+			}
+			// this.domainCombiner = acc.domainCombiner;
+			this.domainCombiner = combiner;
+		}
+		break;
+	case STATE_NOT_AUTHORIZED:
+		break;
+	}
+	// if (parent != null) {
+	// 	this.limitedContext = combinePDObjs(parent.context, parent.limitedContext);
+	// 	this.isLimited = true;
+	// 	this.isWrapped = true;
+	// 	this.permissions = tmp;
+	// 	this.parent = parent;
+	// 	this.privilegedContext = context;
+	// }
+	this.doPrivilegedAcc = acc;
 	this.authorizeState = authorizeState;
 	this.containPrivilegedContext = true;
 }
