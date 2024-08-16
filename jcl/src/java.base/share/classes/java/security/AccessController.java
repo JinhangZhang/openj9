@@ -1,4 +1,4 @@
-/*[INCLUDE-IF JAVA_SPEC_VERSION >= 8]*/
+/*[INCLUDE-IF JAVA_SPEC_VERSION <= 21]*/
 /*
  * Copyright IBM Corp. and others 1998
  *
@@ -1025,8 +1025,24 @@ public static <T> T doPrivilegedWithCombiner(PrivilegedExceptionAction<T> action
  */
 @CallerSensitive
 private static AccessControlContext doPrivilegedWithCombinerHelper(AccessControlContext context) {
+	System.out.println("In openj9 AccessController...");
+
+	ProtectionDomain[] ifdomains = getContextHelper(true).getProtectionDomains();
+    if (ifdomains.length > 0) {
+        System.out.println("have protection domains.");
+    } else {
+        System.out.println("dont have protection domains.");
+    }
+
 	ProtectionDomain domain = getCallerPD(2);
+	System.out.println("domain is: " + domain);
 	ProtectionDomain[] pdArray = (domain == null) ? null : new ProtectionDomain[] { domain };
+	if (getNewAuthorizedState(context, domain) == AccessControlContext.STATE_NOT_AUTHORIZED) {
+		System.out.println("AccessControlContext.STATE_NOT_AUTHORIZED");
+	}
+	if (getNewAuthorizedState(context, domain) == AccessControlContext.STATE_AUTHORIZED) {
+		System.out.println("AccessControlContext.STATE_AUTHORIZED");
+	}
 	AccessControlContext fixedContext = new AccessControlContext(context, pdArray, getNewAuthorizedState(context, domain));
 	if (context == null) {
 		AccessControlContext parentContext = getContextHelper(true);
