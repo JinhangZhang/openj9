@@ -1041,10 +1041,10 @@ public static <T> T doPrivilegedWithCombiner(PrivilegedExceptionAction<T> action
 private static AccessControlContext doPrivilegedWithCombinerHelper(AccessControlContext context) {
 	ProtectionDomain domain = getCallerPD(2);
 	ProtectionDomain[] pdArray = (domain == null) ? null : new ProtectionDomain[] { domain };
-	AccessControlContext parentContext = getContext();
-	DomainCombiner dc = parentContext.getCombiner();
+	AccessControlContext parentContext = getContextHelper(context == null);
+	DomainCombiner domaincombiner = parentContext.getCombiner();
 
-	return new AccessControlContext(pdArray, dc, parentContext, context, getNewAuthorizedState(context, domain));
+	return new AccessControlContext(pdArray, domaincombiner, parentContext, context, getNewAuthorizedState(context, domain));
 }
 
 }
