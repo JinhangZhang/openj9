@@ -135,6 +135,11 @@ public final class CRIUConfigurator {
 			// Note that CRIUSEC was set as security.provider.1 in the method
 			// setCRIUSecMode, which is called before this method.
 			systemProps.remove("security.provider.1");
+			System.out.println("Post-restore: provider list before reloading from the cached oldProvider list:");
+			for (Provider provider: Security.getProviders()) {
+				System.out.println(provider.getName());
+			}
+			System.out.println("Finshed!!!!!!");
 			if (debug) {
 				System.out.println("CRIUSEC provider removed.");
 			}
