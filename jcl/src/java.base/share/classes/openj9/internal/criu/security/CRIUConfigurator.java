@@ -29,6 +29,7 @@ import java.security.Provider.Service;
 import java.security.Security;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -136,8 +137,12 @@ public final class CRIUConfigurator {
 			// setCRIUSecMode, which is called before this method.
 			systemProps.remove("security.provider.1");
 			System.out.println("Post-restore: provider list before reloading from the cached oldProvider list:");
+			Map<Provider, Integer> otherProviderPositions = new HashMap<>();
+        	int position = 1;  //
 			for (Provider provider: Security.getProviders()) {
+				otherProviderPositions.put(provider, position);
 				System.out.println(provider.getName());
+				position++;
 			}
 			System.out.println("Finshed!!!!!!");
 			if (debug) {
@@ -156,6 +161,11 @@ public final class CRIUConfigurator {
 				Providers.setProviderList(providerList);
 			} catch (Exception e) {
 				System.out.println(e.toString());
+			}
+			for (Map.Entry<Provider, Integer> entry : otherProviderPositions.entrySet()) {
+				System.out.println("3rd party provider name is: " + entry.getKey().getName());
+				Security.insertProviderAt(entry.getKey(), entry.getValue() + 1);
+				System.out.println("Restored 3rd party Provider: " + entry.getKey().getName() + " at position " + entry.getValue() + 1);
 			}
 			if (debug) {
 				for (String provider : oldProviders.values()) {
