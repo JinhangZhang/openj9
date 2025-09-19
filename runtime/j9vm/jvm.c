@@ -82,21 +82,6 @@
 #include <stdlib.h>
 
 /*
- * Fallback for PLATFORM_DLL_EXTENSION used in JVM_LoadLibrary’s JDK17+ path.
- * This macro is defined in OMR’s port headers, but jvm.c doesn’t include them.
- * Keep it local to avoid pulling port headers into VM public code.
- */
-#ifndef PLATFORM_DLL_EXTENSION
-#  if defined(WIN32)
-#    define PLATFORM_DLL_EXTENSION ".dll"
-#  elif defined(__APPLE__)
-#    define PLATFORM_DLL_EXTENSION ".dylib"
-#  else
-#    define PLATFORM_DLL_EXTENSION ".so"
-#  endif
-#endif
-
-/*
  * These offsets and constants are found in "Language Environment Vendor Interfaces", downloaded from
  * https://www.ibm.com/servers/resourcelink/svc00100.nsf/pages/zosV2R4SA380688/$file/ceev100_v2r4.pdf
  */
@@ -4033,7 +4018,15 @@ JVM_LoadLibrary(const char *libName, jboolean throwOnFailure)
 
 			const char *fileNameTmp = strrchr(libName, DIR_SEPARATOR);
 			const char *fileName    = (NULL == fileNameTmp) ? libName : (fileNameTmp + 1);
-			const char *extPos      = strstr(fileName, PLATFORM_DLL_EXTENSION); /* ".so" / ".dll" */
+			/* 平台扩展名检测：避免依赖 OMR 的 PLATFORM_DLL_EXTENSION 宏 */
+			const char *extPos      = NULL;
+			#if defined(WIN32)
+				extPos = strstr(fileName, ".dll");
+			#elif defined(__APPLE__)
+				extPos = strstr(fileName, ".dylib");
+			#else
+				extPos = strstr(fileName, ".so");
+			#endif
 
 			if (NULL != extPos) {
 				/* 已含平台扩展名：优先保留版本尾缀 */
