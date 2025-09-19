@@ -3989,98 +3989,118 @@ JVM_LoadLibrary(const char *libName, jboolean throwOnFailure)
 		attemptedLoad = TRUE;
 #endif /* JAVA_SPEC_VERSION >= 17 */
 #endif /* defined(WIN32) */
-		Trc_SC_LoadLibrary_Entry(libName);
-		{
-			UDATA slOpenResult = 0;
-			UDATA handle = 0;
-			UDATA flags = J9_ARE_ANY_BITS_SET(javaVM->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_LAZY_SYMBOL_RESOLUTION) ? J9PORT_SLOPEN_LAZY : 0;
+	Trc_SC_LoadLibrary_Entry(libName);
+	{
+		UDATA slOpenResult = 0;
+		UDATA handle = 0;
+		UDATA flags = J9_ARE_ANY_BITS_SET(javaVM->extendedRuntimeFlags, J9_EXTENDED_RUNTIME_LAZY_SYMBOL_RESOLUTION)
+			? J9PORT_SLOPEN_LAZY : 0;
 
 #if defined(J9VM_ZOS_3164_INTEROPERABILITY)
-			if (J9_ARE_ALL_BITS_SET(javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_3164_INTEROPERABILITY)) {
-				flags |= OMRPORT_SLOPEN_ATTEMPT_31BIT_OPEN;
-			}
+		if (J9_ARE_ALL_BITS_SET(javaVM->extendedRuntimeFlags2, J9_EXTENDED_RUNTIME2_3164_INTEROPERABILITY)) {
+			flags |= OMRPORT_SLOPEN_ATTEMPT_31BIT_OPEN;
+		}
 #endif /* defined(J9VM_ZOS_3164_INTEROPERABILITY) */
 
-			slOpenResult = j9sl_open_shared_library((char *)libName, &handle, flags);
-			Trc_SC_LoadLibrary_OpenShared(libName);
+		/* 第一枪：按原样尝试 */
+		slOpenResult = j9sl_open_shared_library((char *)libName, &handle, flags);
+		Trc_SC_LoadLibrary_OpenShared(libName);
 
-			if (0 != slOpenResult) {
-				char *libNameNotDecorated = (char *)libName;
+		if (0 != slOpenResult) {
+			char *libNameNotDecorated = (char *)libName;
+
 #if JAVA_SPEC_VERSION >= 17
-				/* JDK17+ jdk.internal.loader.NativeLibraries.load() calls JVM_LoadLibrary()
-				 * with a decorated library name, i.e., a path to the library name returned
-				 * from Java_java_lang_System_mapLibraryName(nameNoPrefixNoExtension).
-				 * The library name passed to j9sl_open_shared_library() with the flag
-				 * J9PORT_SLOPEN_DECORATE must be platform independent, i.e., it must not
-				 * contain any prefix or file extension.
-				 */
-				const char *fileExt = strrchr(libName, '.');
-				BOOLEAN doOpenLibrary = TRUE;
-				char libPath[EsMaxPath];
-				libPath[0] = '\0';
-				if (NULL == fileExt) {
-					/* A decorated library name is expected with a file extension,
-					 * pass to j9sl_open_shared_library w/o modification.
-					 */
-					Trc_SC_libName_no_extension(libNameNotDecorated);
-				} else {
-					const char *fileNameTmp = strrchr(libName, DIR_SEPARATOR);
-					const char *fileName = (NULL == fileNameTmp) ? libName : (fileNameTmp + 1);
+			/* B2 修复：已含平台扩展名时保留尾随版本号；仅在 Unix 缺前缀时补 'lib'，且不传 DECORATE。
+			   无扩展名时才走 DECORATE。 */
+			BOOLEAN doOpenLibrary = TRUE;
+			char libPath[EsMaxPath];
+			libPath[0] = '\0';
+
+			const char *fileNameTmp = strrchr(libName, DIR_SEPARATOR);
+			const char *fileName    = (NULL == fileNameTmp) ? libName : (fileNameTmp + 1);
+			const char *extPos      = strstr(fileName, PLATFORM_DLL_EXTENSION); /* ".so" / ".dll" */
+
+			if (NULL != extPos) {
+				/* 已含平台扩展名：优先保留版本尾缀 */
 #if defined(J9OS_I5) || defined(WIN32)
-					/* no library prefix for J9OS_I5 and WIN32 */
-					const size_t libStrLength = 0;
-#else /* defined(J9OS_I5) || defined(WIN32) */
-					/*  strlen("lib") = 3 */
-					const size_t libStrLength = 3;
-					if (0 != strncmp("lib", fileName, libStrLength)) {
-						/* A decorated library name is expected to start with lib prefix for
-						 * platforms other than WIN32 & J9OS_I5.
-						 * Pass to j9sl_open_shared_library w/o modification.
-						 */
-						Trc_SC_libName_no_prefix(fileName);
-					} else
-#endif /* defined(J9OS_I5) || defined(WIN32) */
-					{
-						const char *fileNameNoPrefix = fileName + libStrLength;
-						uintptr_t libDirLength = (uintptr_t)fileName - (uintptr_t)libName;
-						uintptr_t fileNameNotDecoratedLength = (uintptr_t)fileExt - (uintptr_t)fileNameNoPrefix;
-						size_t libPathLength = libDirLength + fileNameNotDecoratedLength + 1;
-						if (libPathLength <= EsMaxPath) {
-							libNameNotDecorated = libPath;
-						} else {
-							libNameNotDecorated = (char *)j9mem_allocate_memory(libPathLength, OMRMEM_CATEGORY_VM);
+				/* 这些平台不需要 'lib' 前缀；已含扩展名则不再兜底 */
+				doOpenLibrary = FALSE;
+#else
+				const size_t libStrLength = 3; /* "lib" */
+				if (0 == strncmp("lib", fileName, libStrLength)) {
+					/* 已有 'lib' 前缀 + 扩展名：不再兜底（避免重复/误改名） */
+					doOpenLibrary = FALSE;
+				} else {
+					/* 仅补 'lib' 前缀，保留扩展名与版本尾缀；不传 DECORATE */
+					uintptr_t libDirLength = (uintptr_t)fileName - (uintptr_t)libName;
+					size_t libPathLength = libDirLength + libStrLength + strlen(fileName) + 1;
+					char *dst = (libPathLength <= EsMaxPath)
+						? libPath
+						: (char *)j9mem_allocate_memory(libPathLength, OMRMEM_CATEGORY_VM);
+					if (NULL == dst) {
+						doOpenLibrary = FALSE;
+						Trc_SC_allocate_memory_failed(libPathLength);
+					} else {
+						j9str_printf(dst, libPathLength, "%.*slib%s",
+						             libDirLength, libName, fileName);
+						slOpenResult = j9sl_open_shared_library(dst, &handle, flags /* no DECORATE */);
+						Trc_SC_LoadLibrary_OpenShared(dst);
+						if (dst != libPath) {
+							j9mem_free_memory(dst);
 						}
-						if (NULL == libNameNotDecorated) {
-							doOpenLibrary = FALSE;
-							Trc_SC_allocate_memory_failed(libPathLength);
-						} else {
-							j9str_printf(
-									libNameNotDecorated,
-									libPathLength,
-									"%.*s%.*s",
-									libDirLength,
-									libName,
-									fileNameNotDecoratedLength,
-									fileNameNoPrefix);
-						}
+						doOpenLibrary = FALSE; /* 兜底已执行 */
 					}
 				}
-				if (doOpenLibrary)
-#endif /* JAVA_SPEC_VERSION >= 17 */
-				{
-					slOpenResult = j9sl_open_shared_library(libNameNotDecorated, &handle, flags | J9PORT_SLOPEN_DECORATE);
-					Trc_SC_LoadLibrary_OpenShared_Decorate(libNameNotDecorated);
-#if JAVA_SPEC_VERSION >= 17
-					if ((libName != libNameNotDecorated) && (libPath != libNameNotDecorated)) {
-						j9mem_free_memory(libNameNotDecorated);
-					}
-#endif /* JAVA_SPEC_VERSION >= 17 */
+#endif /* !WIN32 && !J9OS_I5 */
+			} else {
+				/* 无扩展名：构造“未装饰名”交给下层 DECORATE */
+#if defined(J9OS_I5) || defined(WIN32)
+				/* 这些平台无 'lib' 前缀约束，直接把原名作为未装饰名 */
+				Trc_SC_libName_no_extension(libNameNotDecorated);
+#else
+				/* 非 WIN32/i5：去掉可能的 'lib' 前缀以避免 'liblib...' */
+				const size_t libStrLength = 3;
+				const char *fileNameNoPrefix = (0 == strncmp("lib", fileName, libStrLength))
+					? (fileName + libStrLength) : fileName;
+
+				uintptr_t libDirLength = (uintptr_t)fileName - (uintptr_t)libName;
+				size_t fileNameNotDecoratedLength = strlen(fileNameNoPrefix);
+				size_t libPathLength = libDirLength + fileNameNotDecoratedLength + 1;
+
+				if (libPathLength <= EsMaxPath) {
+					libNameNotDecorated = libPath;
+				} else {
+					libNameNotDecorated = (char *)j9mem_allocate_memory(libPathLength, OMRMEM_CATEGORY_VM);
 				}
+				if (NULL == libNameNotDecorated) {
+					doOpenLibrary = FALSE;
+					Trc_SC_allocate_memory_failed(libPathLength);
+				} else {
+					j9str_printf(libNameNotDecorated, libPathLength, "%.*s%.*s",
+					             libDirLength, libName,
+					             (int)fileNameNotDecoratedLength, fileNameNoPrefix);
+				}
+#endif /* !WIN32 && !J9OS_I5 */
 			}
-			if (0 == slOpenResult) {
-				result = (void *)handle;
+
+			if (doOpenLibrary) {
+				/* 只有无扩展名场景会走到这里：让下层按平台规则补前后缀 */
+				slOpenResult = j9sl_open_shared_library(libNameNotDecorated, &handle, flags | J9PORT_SLOPEN_DECORATE);
+				Trc_SC_LoadLibrary_OpenShared_Decorate(libNameNotDecorated);
+#if !defined(J9OS_I5) && !defined(WIN32)
+				if ((libName != libNameNotDecorated) && (libPath != libNameNotDecorated)) {
+					j9mem_free_memory(libNameNotDecorated);
+				}
+#endif
 			}
+#endif /* JAVA_SPEC_VERSION >= 17 */
 		}
+
+		if (0 == slOpenResult) {
+			result = (void *)handle;
+		}
+	}
+
 #if defined(WIN32)
 	}
 	if (NULL != libNameConverted) {
@@ -4123,7 +4143,6 @@ JVM_LoadLibrary(const char *libName, jboolean throwOnFailure)
 #endif /* JAVA_SPEC_VERSION >= 11 */
 
 	Trc_SC_LoadLibrary_Exit(result);
-
 	return result;
 }
 
